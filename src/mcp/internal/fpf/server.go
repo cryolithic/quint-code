@@ -2,9 +2,12 @@ package fpf
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+
+	"github.com/m0n0x41d/quint-code/logger"
 )
 
 type JSONRPCRequest struct {
@@ -42,16 +45,28 @@ type ContentItem struct {
 	Text string `json:"text"`
 }
 
+// V5ToolHandler handles a v5 MCP tool call and returns the result text.
+type V5ToolHandler func(ctx context.Context, toolName string, params json.RawMessage) (string, error)
+
 type Server struct {
-	tools *Tools
+	v5Handler V5ToolHandler
 }
 
-func NewServer(t *Tools) *Server {
-	return &Server{tools: t}
+func NewServer() *Server {
+	return &Server{}
+}
+
+// SetV5Handler registers the handler for v5 tools (quint_note, quint_problem, etc).
+func (s *Server) SetV5Handler(h V5ToolHandler) {
+	s.v5Handler = h
 }
 
 func (s *Server) Start() {
+	logger.Info().Msg("MCP server starting")
+
 	scanner := bufio.NewScanner(os.Stdin)
+	scanner.Buffer(make([]byte, 1<<20), 1<<20) // 1MB buffer
+
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if len(line) == 0 {
@@ -60,23 +75,47 @@ func (s *Server) Start() {
 
 		var req JSONRPCRequest
 		if err := json.Unmarshal(line, &req); err != nil {
+			logger.Warn().Err(err).Int("line_len", len(line)).Msg("JSON-RPC parse error")
 			s.sendError(nil, -32700, "Parse error")
 			continue
 		}
 
-		switch req.Method {
-		case "initialize":
-			s.handleInitialize(req)
-		case "tools/list":
-			s.handleToolsList(req)
-		case "tools/call":
-			s.handleToolsCall(req)
-		case "notifications/initialized":
-			// No-op
-		default:
+		logger.Debug().Str("method", req.Method).Msg("request received")
+
+		s.handleRequest(req)
+	}
+
+	// Scanner exited — log why
+	if err := scanner.Err(); err != nil {
+		logger.Error().Err(err).Msg("MCP server: scanner error (stdin read failure)")
+	} else {
+		logger.Info().Msg("MCP server: stdin closed (EOF)")
+	}
+}
+
+func (s *Server) handleRequest(req JSONRPCRequest) {
+	// Recover from panics — log and return error instead of crashing
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Error().Interface("panic", r).Str("method", req.Method).Msg("MCP server: panic recovered")
 			if req.ID != nil {
-				s.sendError(req.ID, -32601, "Method not found")
+				s.sendError(req.ID, -32603, fmt.Sprintf("internal error: %v", r))
 			}
+		}
+	}()
+
+	switch req.Method {
+	case "initialize":
+		s.handleInitialize(req)
+	case "tools/list":
+		s.handleToolsList(req)
+	case "tools/call":
+		s.handleToolsCall(req)
+	case "notifications/initialized":
+		// No-op
+	default:
+		if req.ID != nil {
+			s.sendError(req.ID, -32601, "Method not found")
 		}
 	}
 }
@@ -84,10 +123,12 @@ func (s *Server) Start() {
 func (s *Server) send(resp JSONRPCResponse) {
 	bytes, err := json.Marshal(resp)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: failed to marshal JSON-RPC response: %v\n", err)
+		logger.Error().Err(err).Msg("failed to marshal JSON-RPC response")
 		return
 	}
-	fmt.Printf("%s\n", string(bytes))
+	if _, err := fmt.Printf("%s\n", string(bytes)); err != nil {
+		logger.Error().Err(err).Msg("failed to write to stdout")
+	}
 }
 
 func (s *Server) sendResult(id interface{}, result interface{}) {
@@ -114,120 +155,424 @@ func (s *Server) handleInitialize(req JSONRPCRequest) {
 		},
 		"serverInfo": map[string]string{
 			"name":    "quint-code",
-			"version": "4.0.0",
+			"version": "5.0.0",
 		},
 	})
 }
 
 func (s *Server) handleToolsList(req JSONRPCRequest) {
-	tools := []Tool{
-		{
-			Name:        "quint_status",
-			Description: "Get current FPF phase and context.",
-			InputSchema: map[string]interface{}{
-				"type":       "object",
-				"properties": map[string]interface{}{},
+	var tools []Tool
+
+	// v5 tools only
+	if s.v5Handler != nil {
+		tools = append(tools,
+			Tool{
+				Name:        "quint_note",
+				Description: "Record a micro-decision with rationale. Validates before recording: checks for missing rationale, conflicts with active decisions, and whether the scope is too large for a note. Use for quick engineering choices during coding.",
+				InputSchema: map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"title": map[string]string{
+							"type":        "string",
+							"description": "What was decided (e.g., 'RWMutex over channels for session cache')",
+						},
+						"rationale": map[string]string{
+							"type":        "string",
+							"description": "Why this choice — what alternatives existed, what evidence supports it",
+						},
+						"affected_files": map[string]interface{}{
+							"type":        "array",
+							"items":       map[string]string{"type": "string"},
+							"description": "File paths affected by this decision",
+						},
+						"evidence": map[string]string{
+							"type":        "string",
+							"description": "Supporting evidence (benchmarks, test results, references)",
+						},
+						"search_keywords": map[string]string{
+							"type":        "string",
+							"description": "Space-separated synonyms and related terms for search enrichment (e.g., 'redis cache caching in-memory key-value nosql')",
+						},
+						"context": map[string]string{
+							"type":        "string",
+							"description": "Optional context name for grouping (e.g., 'auth', 'payments')",
+						},
+					},
+					"required": []string{"title", "rationale"},
+				},
 			},
-		},
-		{
-			Name:        "quint_init",
-			Description: "Initialize FPF project structure.",
-			InputSchema: map[string]interface{}{
-				"type":       "object",
-				"properties": map[string]interface{}{},
+			Tool{
+				Name:        "quint_problem",
+				Description: "Frame, characterize, and manage engineering problems. Actions: 'frame' creates a ProblemCard, 'characterize' adds comparison dimensions, 'select' lists active problems. Frame the problem BEFORE exploring solutions.",
+				InputSchema: map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"action": map[string]interface{}{
+							"type":        "string",
+							"enum":        []interface{}{"frame", "characterize", "select"},
+							"description": "frame=create ProblemCard, characterize=add comparison dimensions, select=list/filter active problems",
+						},
+						"title": map[string]string{
+							"type":        "string",
+							"description": "(frame) Problem title",
+						},
+						"signal": map[string]string{
+							"type":        "string",
+							"description": "(frame) What's anomalous, broken, or needs changing",
+						},
+						"constraints": map[string]interface{}{
+							"type":        "array",
+							"items":       map[string]string{"type": "string"},
+							"description": "(frame) Hard constraints that MUST hold",
+						},
+						"optimization_targets": map[string]interface{}{
+							"type":        "array",
+							"items":       map[string]string{"type": "string"},
+							"description": "(frame) What to improve (1-3 max)",
+						},
+						"observation_indicators": map[string]interface{}{
+							"type":        "array",
+							"items":       map[string]string{"type": "string"},
+							"description": "(frame) What to monitor but NOT optimize (Anti-Goodhart)",
+						},
+						"acceptance": map[string]string{
+							"type":        "string",
+							"description": "(frame) How we'll know the problem is solved",
+						},
+						"blast_radius": map[string]string{
+							"type":        "string",
+							"description": "(frame) What systems/teams are affected",
+						},
+						"reversibility": map[string]string{
+							"type":        "string",
+							"description": "(frame) How easy to undo — low/medium/high",
+						},
+						"problem_ref": map[string]string{
+							"type":        "string",
+							"description": "(characterize) ID of the ProblemCard to add dimensions to",
+						},
+						"dimensions": map[string]interface{}{
+							"type": "array",
+							"items": map[string]interface{}{
+								"type": "object",
+								"properties": map[string]interface{}{
+									"name":           map[string]string{"type": "string", "description": "Dimension name (e.g., 'throughput', 'ops complexity')"},
+									"scale_type":     map[string]string{"type": "string", "description": "ordinal, ratio, nominal"},
+									"unit":           map[string]string{"type": "string", "description": "Measurement unit"},
+									"polarity":       map[string]string{"type": "string", "description": "higher_better or lower_better"},
+									"role":           map[string]string{"type": "string", "description": "Indicator role: constraint (hard limit), target (optimize), observation (watch, don't optimize). Default: target"},
+									"how_to_measure": map[string]string{"type": "string", "description": "How this dimension is measured"},
+									"valid_until":    map[string]string{"type": "string", "description": "When this measurement expires (RFC3339). Compare warns on expired dimensions."},
+								},
+								"required": []string{"name"},
+							},
+							"description": "(characterize) Comparison dimensions for evaluating solutions",
+						},
+						"parity_rules": map[string]string{
+							"type":        "string",
+							"description": "(characterize) What must be equal across all variants for fair comparison",
+						},
+						"context": map[string]string{
+							"type":        "string",
+							"description": "Optional context name for grouping",
+						},
+						"mode": map[string]string{
+							"type":        "string",
+							"description": "(frame) Decision mode: tactical, standard (default), deep",
+						},
+					},
+					"required": []string{"action"},
+				},
 			},
-		},
-		{
-			Name:        "quint_record_context",
-			Description: "Record the Bounded Context (A.1.1).",
+		)
+
+		tools = append(tools, Tool{
+			Name:        "quint_solution",
+			Description: "Explore solution variants and compare them fairly. Actions: 'explore' creates a SolutionPortfolio with >=2 variants (each with weakest link), 'compare' runs parity check and identifies the Pareto front.",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
-					"vocabulary": map[string]string{"type": "string", "description": "Key terms"},
-					"invariants": map[string]string{"type": "string", "description": "System rules"},
+					"action": map[string]interface{}{
+						"type":        "string",
+						"enum":        []interface{}{"explore", "compare"},
+						"description": "explore=create variants portfolio, compare=run parity comparison",
+					},
+					"problem_ref": map[string]string{
+						"type":        "string",
+						"description": "(explore) ProblemCard ID this portfolio solves. Auto-detected if only one active.",
+					},
+					"variants": map[string]interface{}{
+						"type": "array",
+						"items": map[string]interface{}{
+							"type": "object",
+							"properties": map[string]interface{}{
+								"title":          map[string]string{"type": "string", "description": "Variant name"},
+								"description":    map[string]string{"type": "string", "description": "What this option does"},
+								"strengths":      map[string]interface{}{"type": "array", "items": map[string]string{"type": "string"}},
+								"weakest_link":   map[string]string{"type": "string", "description": "What bounds this option's quality (WLNK)"},
+								"risks":          map[string]interface{}{"type": "array", "items": map[string]string{"type": "string"}},
+								"stepping_stone": map[string]interface{}{"type": "boolean", "description": "Opens future possibilities even if not optimal now"},
+								"rollback_notes": map[string]string{"type": "string"},
+							},
+							"required": []string{"title", "weakest_link"},
+						},
+						"description": "(explore) Solution variants — at least 2, genuinely distinct",
+					},
+					"portfolio_ref": map[string]string{
+						"type":        "string",
+						"description": "(compare) SolutionPortfolio ID to add comparison results to. Auto-detected if only one active.",
+					},
+					"dimensions": map[string]interface{}{
+						"type":        "array",
+						"items":       map[string]string{"type": "string"},
+						"description": "(compare) Comparison dimension names",
+					},
+					"scores": map[string]interface{}{
+						"type":        "object",
+						"description": "(compare) Scores per variant: {\"V1\": {\"throughput\": \"100k/s\", \"cost\": \"$200\"}}",
+					},
+					"non_dominated_set": map[string]interface{}{
+						"type":        "array",
+						"items":       map[string]string{"type": "string"},
+						"description": "(compare) Variant IDs on the Pareto front",
+					},
+					"policy_applied": map[string]string{
+						"type":        "string",
+						"description": "(compare) Selection policy that was applied",
+					},
+					"selected_ref": map[string]string{
+						"type":        "string",
+						"description": "(compare) Recommended variant ID",
+					},
+					"context": map[string]string{
+						"type":        "string",
+						"description": "Optional context name",
+					},
+					"mode": map[string]string{
+						"type":        "string",
+						"description": "(explore) Decision mode: tactical, standard (default), deep",
+					},
 				},
-				"required": []string{"vocabulary", "invariants"},
+				"required": []string{"action"},
 			},
-		},
-		{
-			Name:        "quint_propose",
-			Description: "Propose a new hypothesis (L0).",
+		})
+		tools = append(tools, Tool{
+			Name:        "quint_decision",
+			Description: "Manage the decision lifecycle. Actions: 'decide' creates a DecisionRecord, 'apply' generates implementation brief, 'measure' records post-implementation impact, 'evidence' attaches evidence to any artifact, 'baseline' snapshots affected files for drift detection.",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
-					"title":     map[string]string{"type": "string", "description": "Title"},
-					"content":   map[string]string{"type": "string", "description": "Description"},
-					"scope":     map[string]string{"type": "string", "description": "Scope (G)"},
-					"kind":      map[string]interface{}{"type": "string", "enum": []interface{}{"system", "episteme"}},
-					"rationale": map[string]string{"type": "string", "description": "JSON string of rationale (anomaly, alternatives)"},
+					"action": map[string]interface{}{
+						"type":        "string",
+						"enum":        []interface{}{"decide", "apply", "measure", "evidence", "baseline"},
+						"description": "decide=create DRR, apply=impl brief, measure=record impact, evidence=attach evidence item, baseline=snapshot affected files for drift detection",
+					},
+					"selected_title": map[string]string{
+						"type":        "string",
+						"description": "(decide) Name of the selected variant",
+					},
+					"why_selected": map[string]string{
+						"type":        "string",
+						"description": "(decide) Why this variant was chosen",
+					},
+					"why_not_others": map[string]interface{}{
+						"type": "array",
+						"items": map[string]interface{}{
+							"type": "object",
+							"properties": map[string]interface{}{
+								"variant": map[string]string{"type": "string"},
+								"reason":  map[string]string{"type": "string"},
+							},
+						},
+						"description": "(decide) Why each rejected variant was not selected",
+					},
+					"invariants": map[string]interface{}{
+						"type": "array", "items": map[string]string{"type": "string"},
+						"description": "(decide) What MUST hold at all times",
+					},
+					"pre_conditions": map[string]interface{}{
+						"type": "array", "items": map[string]string{"type": "string"},
+						"description": "(decide) What MUST be true before implementation",
+					},
+					"post_conditions": map[string]interface{}{
+						"type": "array", "items": map[string]string{"type": "string"},
+						"description": "(decide) What MUST be true after implementation",
+					},
+					"admissibility": map[string]interface{}{
+						"type": "array", "items": map[string]string{"type": "string"},
+						"description": "(decide) What is NOT acceptable",
+					},
+					"evidence_requirements": map[string]interface{}{
+						"type": "array", "items": map[string]string{"type": "string"},
+						"description": "(decide) What to measure/prove during implementation",
+					},
+					"rollback": map[string]interface{}{
+						"type": "object",
+						"properties": map[string]interface{}{
+							"triggers":     map[string]interface{}{"type": "array", "items": map[string]string{"type": "string"}},
+							"steps":        map[string]interface{}{"type": "array", "items": map[string]string{"type": "string"}},
+							"blast_radius": map[string]string{"type": "string"},
+						},
+						"description": "(decide) When and how to reverse",
+					},
+					"refresh_triggers": map[string]interface{}{
+						"type": "array", "items": map[string]string{"type": "string"},
+						"description": "(decide) When to re-evaluate this decision",
+					},
+					"weakest_link": map[string]string{
+						"type":        "string",
+						"description": "(decide) What bounds this decision's reliability",
+					},
+					"problem_ref": map[string]string{
+						"type": "string", "description": "(decide) Single ProblemCard ID. Use problem_refs for multiple.",
+					},
+					"problem_refs": map[string]interface{}{
+						"type":        "array",
+						"items":       map[string]string{"type": "string"},
+						"description": "(decide) ProblemCard IDs this decision addresses — supports multiple problems",
+					},
+					"portfolio_ref": map[string]string{
+						"type": "string", "description": "(decide) SolutionPortfolio ID",
+					},
+					"decision_ref": map[string]string{
+						"type": "string", "description": "(apply) DecisionRecord ID to generate brief from",
+					},
+					"valid_until": map[string]string{
+						"type": "string", "description": "(decide) Expiry date (RFC3339)",
+					},
+					"affected_files": map[string]interface{}{
+						"type": "array", "items": map[string]string{"type": "string"},
+						"description": "(decide/baseline) Files affected by this decision. For baseline: optional — if provided, replaces the file list before snapshotting.",
+					},
+					"search_keywords": map[string]string{
+						"type":        "string",
+						"description": "(decide) Space-separated synonyms and related terms for search enrichment",
+					},
+					"findings": map[string]string{
+						"type": "string", "description": "(measure) What actually happened after implementation",
+					},
+					"criteria_met": map[string]interface{}{
+						"type": "array", "items": map[string]string{"type": "string"},
+						"description": "(measure) Acceptance criteria that were met",
+					},
+					"criteria_not_met": map[string]interface{}{
+						"type": "array", "items": map[string]string{"type": "string"},
+						"description": "(measure) Acceptance criteria NOT met",
+					},
+					"measurements": map[string]interface{}{
+						"type": "array", "items": map[string]string{"type": "string"},
+						"description": "(measure) Measured values (e.g., 'p99 latency: 42ms')",
+					},
+					"verdict": map[string]string{
+						"type": "string", "description": "(measure) accepted, partial, or failed",
+					},
+					"artifact_ref": map[string]string{
+						"type": "string", "description": "(evidence) Artifact ID to attach evidence to",
+					},
+					"evidence_content": map[string]string{
+						"type": "string", "description": "(evidence) The evidence itself",
+					},
+					"evidence_type": map[string]string{
+						"type": "string", "description": "(evidence) measurement, test, research, benchmark, audit",
+					},
+					"evidence_verdict": map[string]string{
+						"type": "string", "description": "(evidence) supports, weakens, refutes",
+					},
+					"carrier_ref": map[string]string{
+						"type": "string", "description": "(evidence) File path or URL of evidence source",
+					},
+					"congruence_level": map[string]interface{}{
+						"type": "integer", "description": "(evidence) CL 0-3: 3=same context, 2=similar, 1=different, 0=opposed",
+					},
+					"context": map[string]string{"type": "string", "description": "Optional context name"},
+					"mode":    map[string]string{"type": "string", "description": "(decide) tactical, standard (default), deep"},
 				},
-				"required": []string{"title", "content", "scope", "kind", "rationale"},
+				"required": []string{"action"},
 			},
-		},
-		{
-			Name:        "quint_verify",
-			Description: "Record verification results (L0 -> L1).",
+		})
+		tools = append(tools, Tool{
+			Name:        "quint_refresh",
+			Description: "Manage artifact lifecycle — detect stale items, extend validity, archive, replace, or find note-decision overlaps. Works on ALL artifact types. Actions: 'scan' finds expired and evidence-degraded artifacts, 'waive' extends validity, 'reopen' starts new problem cycle from a decision, 'supersede' replaces one artifact with another, 'deprecate' archives as no longer relevant, 'reconcile' finds notes that overlap with decisions.",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
-					"hypothesis_id": map[string]string{"type": "string"},
-					"checks_json":   map[string]string{"type": "string", "description": "JSON of checks"},
-					"verdict":       map[string]interface{}{"type": "string", "enum": []interface{}{"PASS", "FAIL", "REFINE"}},
+					"action": map[string]interface{}{
+						"type":        "string",
+						"enum":        []interface{}{"scan", "waive", "reopen", "supersede", "deprecate", "reconcile"},
+						"description": "scan=find stale/degraded, waive=extend validity, reopen=new problem cycle, supersede=replace, deprecate=archive, reconcile=find note-decision overlaps",
+					},
+					"artifact_ref": map[string]string{
+						"type":        "string",
+						"description": "Artifact ID to act on — any kind: note, problem, decision, portfolio (required for waive/reopen/supersede/deprecate)",
+					},
+					"decision_ref": map[string]string{
+						"type":        "string",
+						"description": "Deprecated: use artifact_ref instead. Kept for backward compatibility.",
+					},
+					"reason": map[string]string{
+						"type":        "string",
+						"description": "Why this refresh action is being taken",
+					},
+					"new_valid_until": map[string]string{
+						"type":        "string",
+						"description": "(waive) New expiry date in RFC3339 format. Default: +90 days.",
+					},
+					"evidence": map[string]string{
+						"type":        "string",
+						"description": "(waive) Evidence supporting the extension",
+					},
+					"new_decision_ref": map[string]string{
+						"type":        "string",
+						"description": "(supersede) ID of the replacement artifact. Deprecated: use new_artifact_ref.",
+					},
+					"new_artifact_ref": map[string]string{
+						"type":        "string",
+						"description": "(supersede) ID of the artifact replacing this one",
+					},
+					"context": map[string]string{
+						"type":        "string",
+						"description": "Optional context filter for scan",
+					},
 				},
-				"required": []string{"hypothesis_id", "checks_json", "verdict"},
+				"required": []string{"action"},
 			},
-		},
-		{
-			Name:        "quint_test",
-			Description: "Record validation results (L1 -> L2).",
+		})
+
+		tools = append(tools, Tool{
+			Name:        "quint_query",
+			Description: "Search past decisions, check status, find related artifacts, list all artifacts by kind, or show module coverage. Actions: 'search' does FTS5 search, 'status' shows compact dashboard, 'related' finds decisions affecting a file, 'list' shows all artifacts of a given kind, 'coverage' shows module-level decision coverage.",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
-					"hypothesis_id": map[string]string{"type": "string"},
-					"test_type":     map[string]string{"type": "string", "description": "internal or research"},
-					"result":        map[string]string{"type": "string", "description": "Test output/findings"},
-					"verdict":       map[string]interface{}{"type": "string", "enum": []interface{}{"PASS", "FAIL", "REFINE"}},
+					"action": map[string]interface{}{
+						"type":        "string",
+						"enum":        []interface{}{"search", "status", "related", "list", "coverage"},
+						"description": "search=FTS5 keyword search, status=compact dashboard, related=by file path, list=all artifacts by kind, coverage=module-level decision coverage",
+					},
+					"query": map[string]string{
+						"type":        "string",
+						"description": "(search) Search terms",
+					},
+					"kind": map[string]string{
+						"type":        "string",
+						"description": "(list) Artifact kind: Note, ProblemCard, SolutionPortfolio, DecisionRecord, EvidencePack, RefreshReport",
+					},
+					"file": map[string]string{
+						"type":        "string",
+						"description": "(related) File path to find linked decisions",
+					},
+					"context": map[string]string{
+						"type":        "string",
+						"description": "Optional context filter",
+					},
+					"limit": map[string]interface{}{
+						"type":        "integer",
+						"description": "(search) Max results, default 20",
+					},
 				},
-				"required": []string{"hypothesis_id", "test_type", "result", "verdict"},
+				"required": []string{"action"},
 			},
-		},
-		{
-			Name:        "quint_audit",
-			Description: "Record audit/trust score (R_eff).",
-			InputSchema: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"hypothesis_id": map[string]string{"type": "string"},
-					"risks":         map[string]string{"type": "string", "description": "Risk analysis"},
-				},
-				"required": []string{"hypothesis_id", "risks"},
-			},
-		},
-		{
-			Name:        "quint_decide",
-			Description: "Finalize decision (DRR).",
-			InputSchema: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"title":           map[string]string{"type": "string"},
-					"winner_id":       map[string]string{"type": "string"},
-					"context":         map[string]string{"type": "string"},
-					"decision":        map[string]string{"type": "string"},
-					"rationale":       map[string]string{"type": "string"},
-					"consequences":    map[string]string{"type": "string"},
-					"characteristics": map[string]string{"type": "string"},
-				},
-				"required": []string{"title", "winner_id", "context", "decision", "rationale", "consequences"},
-			},
-		},
-		{
-			Name:        "quint_actualize",
-			Description: "Reconcile the project's FPF state with recent repository changes.",
-			InputSchema: map[string]interface{}{
-				"type":       "object",
-				"properties": map[string]interface{}{},
-			},
-		},
+		})
 	}
 
 	s.sendResult(req.ID, map[string]interface{}{
@@ -236,92 +581,27 @@ func (s *Server) handleToolsList(req JSONRPCRequest) {
 }
 
 func (s *Server) handleToolsCall(req JSONRPCRequest) {
+	ctx := context.Background()
+
 	var params struct {
-		Name      string                 `json:"name"`
-		Arguments map[string]interface{} `json:"arguments"`
+		Name      string          `json:"name"`
+		Arguments json.RawMessage `json:"arguments"`
 	}
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		s.sendError(req.ID, -32700, "Invalid params")
 		return
 	}
 
-	arg := func(k string) string {
-		if v, ok := params.Arguments[k].(string); ok {
-			return v
-		}
-		return ""
+	// All tools are handled by the v5 handler
+	if s.v5Handler == nil {
+		s.sendResult(req.ID, CallToolResult{
+			Content: []ContentItem{{Type: "text", Text: "Quint Code not initialized. Run: quint-code init"}},
+			IsError: true,
+		})
+		return
 	}
 
-	var output string
-	var err error
-
-	switch params.Name {
-	case "quint_status":
-		st := s.tools.FSM.State.Phase
-		output = string(st)
-
-	case "quint_init":
-		res := s.tools.InitProject()
-		if res != nil {
-			err = res
-		} else {
-			s.tools.FSM.State.Phase = PhaseAbduction
-			if saveErr := s.tools.FSM.SaveState(s.tools.GetFPFDir() + "/state.json"); saveErr != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to save state: %v\n", saveErr)
-			}
-			output = "Initialized. Phase: ABDUCTION"
-		}
-
-	case "quint_actualize":
-		output, err = s.tools.Actualize()
-
-	case "quint_record_context":
-		output, err = s.tools.RecordContext(arg("vocabulary"), arg("invariants"))
-
-	case "quint_propose":
-		s.tools.FSM.State.Phase = PhaseAbduction
-		if saveErr := s.tools.FSM.SaveState(s.tools.GetFPFDir() + "/state.json"); saveErr != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to save state: %v\n", saveErr)
-		}
-		output, err = s.tools.ProposeHypothesis(arg("title"), arg("content"), arg("scope"), arg("kind"), arg("rationale"))
-
-	case "quint_verify":
-		s.tools.FSM.State.Phase = PhaseDeduction
-		if saveErr := s.tools.FSM.SaveState(s.tools.GetFPFDir() + "/state.json"); saveErr != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to save state: %v\n", saveErr)
-		}
-		output, err = s.tools.VerifyHypothesis(arg("hypothesis_id"), arg("checks_json"), arg("verdict"))
-
-	case "quint_test":
-		s.tools.FSM.State.Phase = PhaseInduction
-		if saveErr := s.tools.FSM.SaveState(s.tools.GetFPFDir() + "/state.json"); saveErr != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to save state: %v\n", saveErr)
-		}
-
-		assLevel := "L2"
-		if arg("verdict") != "PASS" {
-			assLevel = "L1"
-		}
-
-		output, err = s.tools.ManageEvidence(PhaseInduction, "add", arg("hypothesis_id"), arg("test_type"), arg("result"), arg("verdict"), assLevel, "test-runner", "")
-
-	case "quint_audit":
-		output, err = s.tools.AuditEvidence(arg("hypothesis_id"), arg("risks"))
-
-	case "quint_decide":
-		s.tools.FSM.State.Phase = PhaseDecision
-		output, err = s.tools.FinalizeDecision(arg("title"), arg("winner_id"), arg("context"), arg("decision"), arg("rationale"), arg("consequences"), arg("characteristics"))
-		if err == nil {
-			s.tools.FSM.State.Phase = PhaseIdle
-			if saveErr := s.tools.FSM.SaveState(s.tools.GetFPFDir() + "/state.json"); saveErr != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to save state: %v\n", saveErr)
-			}
-		}
-
-	default:
-		err = fmt.Errorf("unknown tool: %s", params.Name)
-	}
-
+	output, err := s.v5Handler(ctx, params.Name, req.Params)
 	if err != nil {
 		s.sendResult(req.ID, CallToolResult{
 			Content: []ContentItem{{Type: "text", Text: err.Error()}},

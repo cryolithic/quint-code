@@ -93,7 +93,15 @@ main() {
         ) &
         spinner $! "Downloading release ($os_arch)"
 
-        cp "$tmp_dir/bin/$BIN_NAME" "$bin_dir/$BIN_NAME"
+        # goreleaser puts binary at archive root, not in bin/
+        if [[ -f "$tmp_dir/$BIN_NAME" ]]; then
+            cp "$tmp_dir/$BIN_NAME" "$bin_dir/$BIN_NAME"
+        elif [[ -f "$tmp_dir/bin/$BIN_NAME" ]]; then
+            cp "$tmp_dir/bin/$BIN_NAME" "$bin_dir/$BIN_NAME"
+        else
+            printf "${RED}   ✗ Binary not found in archive${RESET}\n"
+            exit 1
+        fi
         chmod +x "$bin_dir/$BIN_NAME"
 
         # macOS: re-sign binary locally to bypass Gatekeeper
@@ -133,7 +141,7 @@ main() {
     printf "${GREEN}    ╚════════════════════════════════════════════════════════════╝${RESET}\n"
     echo ""
     printf "   ${WHITE}${BOLD}Next step:${RESET}\n"
-    printf "   cd /path/to/your/project && ${WHITE}quint-code init${RESET}\n"
+    printf "   In your project directory, run: ${WHITE}quint-code init${RESET}\n"
     echo ""
 }
 

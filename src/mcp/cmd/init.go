@@ -3,12 +3,15 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/m0n0x41d/quint-code/db"
+	"github.com/m0n0x41d/quint-code/internal/project"
+
 	"github.com/spf13/cobra"
-	"quint-mcp/db"
 )
 
 var (
@@ -16,6 +19,7 @@ var (
 	initCursor bool
 	initGemini bool
 	initCodex  bool
+	initAir    bool
 	initAll    bool
 	initLocal  bool
 )
@@ -28,13 +32,15 @@ var initCmd = &cobra.Command{
 This command creates:
   - .quint/ directory structure (knowledge base, evidence, decisions)
   - MCP configuration for selected AI tools
-  - Slash commands (global by default, or local with --local)
+  - Slash commands / prompts (global by default, or local with --local)
+  - Repo-local Air skills when requested
 
 Examples:
   quint-code init              # Claude, global commands (~/.claude/commands/)
   quint-code init --local      # Claude, local commands (.claude/commands/)
   quint-code init --all        # All tools, global commands
-  quint-code init --cursor     # Cursor only`,
+  quint-code init --cursor     # Cursor only
+  quint-code init --air        # Air skill + Codex-compatible prompts/MCP`,
 	RunE: runInit,
 }
 
@@ -43,6 +49,7 @@ func init() {
 	initCmd.Flags().BoolVar(&initCursor, "cursor", false, "Configure for Cursor")
 	initCmd.Flags().BoolVar(&initGemini, "gemini", false, "Configure for Gemini CLI")
 	initCmd.Flags().BoolVar(&initCodex, "codex", false, "Configure for Codex CLI")
+	initCmd.Flags().BoolVar(&initAir, "air", false, "Configure for JetBrains Air")
 	initCmd.Flags().BoolVar(&initAll, "all", false, "Configure for all supported tools")
 	initCmd.Flags().BoolVar(&initLocal, "local", false, "Install commands in project directory instead of global")
 
@@ -56,10 +63,8 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 
 	quintDir := filepath.Join(cwd, ".quint")
-	dbPath := filepath.Join(quintDir, "quint.db")
 
 	_, quintExists := os.Stat(quintDir)
-	_, dbExists := os.Stat(dbPath)
 
 	fmt.Println("Initializing Quint Code project...")
 
@@ -72,12 +77,43 @@ func runInit(cmd *cobra.Command, args []string) error {
 		fmt.Println("  ✓ .quint/ directory structure OK")
 	}
 
-	if err := initializeDatabase(quintDir); err != nil {
-		return fmt.Errorf("failed to initialize database: %w", err)
+	// Create or load project identity
+	projCfg, err := project.Create(quintDir, cwd)
+	if err != nil {
+		return fmt.Errorf("failed to create project identity: %w", err)
 	}
-	if os.IsNotExist(dbExists) {
+	fmt.Printf("  ✓ Project ID: %s (%s)\n", projCfg.ID, projCfg.Name)
+
+	// Determine DB path — unified storage in ~/.quint-code/projects/{id}/
+	unifiedDBPath, err := projCfg.DBPath()
+	if err != nil {
+		return fmt.Errorf("failed to determine DB path: %w", err)
+	}
+
+	oldDBPath := filepath.Join(quintDir, "quint.db")
+	_, oldDBExists := os.Stat(oldDBPath)
+	_, unifiedDBExists := os.Stat(unifiedDBPath)
+
+	if os.IsNotExist(unifiedDBExists) && !os.IsNotExist(oldDBExists) {
+		// Migration: copy old DB to unified location
+		if err := copyFile(oldDBPath, unifiedDBPath); err != nil {
+			return fmt.Errorf("failed to migrate database: %w", err)
+		}
+		fmt.Printf("  ✓ Migrated database to %s\n", unifiedDBPath)
+
+		// Add quint.db to .quint/.gitignore
+		addToGitignore(quintDir, "quint.db")
+	} else if os.IsNotExist(unifiedDBExists) {
+		// Fresh init — create DB at unified location
+		if err := initializeDatabase(unifiedDBPath); err != nil {
+			return fmt.Errorf("failed to initialize database: %w", err)
+		}
 		fmt.Println("  ✓ Initialized database")
 	} else {
+		// DB already exists at unified location — run migrations
+		if err := initializeDatabase(unifiedDBPath); err != nil {
+			return fmt.Errorf("failed to update database: %w", err)
+		}
 		fmt.Println("  ✓ Database OK")
 	}
 
@@ -88,10 +124,10 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 
 	if initAll {
-		initClaude, initCursor, initGemini, initCodex = true, true, true, true
+		initClaude, initCursor, initGemini, initCodex, initAir = true, true, true, true, true
 	}
 
-	if !initClaude && !initCursor && !initGemini && !initCodex {
+	if !initClaude && !initCursor && !initGemini && !initCodex && !initAir {
 		initClaude = true
 	}
 
@@ -106,6 +142,11 @@ func runInit(cmd *cobra.Command, args []string) error {
 		} else {
 			fmt.Printf("  ✓ Installed %d slash commands (%s)\n", count, destPath)
 		}
+		if skillPath, err := installSkill("claude", initLocal, cwd); err != nil {
+			fmt.Printf("  ⚠ Failed to install FPF skill: %v\n", err)
+		} else if skillPath != "" {
+			fmt.Printf("  ✓ Installed /q-reason skill (%s)\n", skillPath)
+		}
 	}
 
 	if initCursor {
@@ -119,6 +160,11 @@ func runInit(cmd *cobra.Command, args []string) error {
 			fmt.Printf("  ⚠ Failed to install Cursor commands: %v\n", err)
 		} else {
 			fmt.Printf("  ✓ Installed %d slash commands (%s)\n", count, destPath)
+		}
+		if skillPath, err := installSkill("cursor", initLocal, cwd); err != nil {
+			fmt.Printf("  ⚠ Failed to install FPF skill: %v\n", err)
+		} else if skillPath != "" {
+			fmt.Printf("  ✓ Installed /q-reason skill (%s)\n", skillPath)
 		}
 	}
 
@@ -135,35 +181,152 @@ func runInit(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if initCodex {
-		if err := configureMCPCodex(cwd, binaryPath); err != nil {
-			fmt.Printf("  ⚠ Failed to configure Codex CLI MCP: %v\n", err)
-		} else {
-			fmt.Printf("  ✓ Configured MCP for Codex CLI (project: %s)\n", cwd)
+	if initCodex || initAir {
+		targetName := "Codex CLI"
+		switch {
+		case initCodex && initAir:
+			targetName = "Codex CLI / Air"
+		case initAir:
+			targetName = "Air"
 		}
-		// Codex only supports global prompts
+
+		if err := configureMCPCodex(cwd, binaryPath); err != nil {
+			fmt.Printf("  ⚠ Failed to configure %s MCP: %v\n", targetName, err)
+		} else {
+			fmt.Printf("  ✓ Configured MCP for %s (project: %s)\n", targetName, cwd)
+		}
+
+		// Air currently uses the same Codex prompt/MCP bootstrap.
 		if destPath, count, err := installCommands(cwd, "codex", false); err != nil {
-			fmt.Printf("  ⚠ Failed to install Codex prompts: %v\n", err)
+			fmt.Printf("  ⚠ Failed to install %s prompts: %v\n", targetName, err)
 		} else {
 			fmt.Printf("  ✓ Installed %d prompts (%s)\n", count, destPath)
-			fmt.Println("    Note: Use /prompts:q0-init to invoke")
+			fmt.Println("    Note: Use /prompts:q-note to invoke")
+		}
+
+		if initCodex {
+			if skillPath, err := installSkill("codex", false, cwd); err != nil {
+				fmt.Printf("  ⚠ Failed to install Codex skill: %v\n", err)
+			} else if skillPath != "" {
+				fmt.Printf("  ✓ Installed Codex skill $q-reason (%s)\n", skillPath)
+			}
+		}
+		if initAir {
+			if skillPath, err := installSkill("air", true, cwd); err != nil {
+				fmt.Printf("  ⚠ Failed to install Air skill: %v\n", err)
+			} else if skillPath != "" {
+				fmt.Printf("  ✓ Installed Air skill q-reason (%s)\n", skillPath)
+			}
 		}
 	}
 
-	fmt.Println("\nInitialization complete! Run /q0-init to start.")
+	fmt.Println("\nInitialization complete!")
+
+	// Check if project already has artifacts
+	hasArtifacts := false
+	if database, err := db.NewStore(unifiedDBPath); err == nil {
+		var count int
+		if err := database.GetRawDB().QueryRow("SELECT COUNT(*) FROM artifacts").Scan(&count); err == nil && count > 0 {
+			hasArtifacts = true
+		}
+		_ = database.Close()
+	}
+
+	if hasArtifacts {
+		fmt.Println("Use /q-status to see active decisions and problems.")
+	} else if detectBrownfield(cwd) {
+		fmt.Println("\nThis looks like an existing project. Run /q-onboard to discover")
+		fmt.Println("existing decisions, architecture docs, ADRs, and build a knowledge map.")
+	} else {
+		fmt.Println("Use /q-note to capture decisions, /q-reason for structured reasoning.")
+	}
 	return nil
 }
 
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+	return out.Sync()
+}
+
+func addToGitignore(quintDir, entry string) {
+	gitignorePath := filepath.Join(quintDir, ".gitignore")
+	content, _ := os.ReadFile(gitignorePath)
+
+	// Check if already present
+	if strings.Contains(string(content), entry) {
+		return
+	}
+
+	f, err := os.OpenFile(gitignorePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+
+	if len(content) > 0 && content[len(content)-1] != '\n' {
+		_, _ = f.WriteString("\n")
+	}
+	_, _ = f.WriteString(entry + "\n")
+}
+
+func detectBrownfield(projectRoot string) bool {
+	// Check for git history with meaningful commits
+	gitDir := filepath.Join(projectRoot, ".git")
+	if _, err := os.Stat(gitDir); os.IsNotExist(err) {
+		return false
+	}
+
+	// Check for code indicators
+	codeIndicators := []string{
+		"go.mod", "package.json", "pyproject.toml", "Cargo.toml",
+		"pom.xml", "build.gradle", "Makefile", "CMakeLists.txt",
+	}
+	for _, f := range codeIndicators {
+		if _, err := os.Stat(filepath.Join(projectRoot, f)); err == nil {
+			return true
+		}
+	}
+
+	// Check for docs that suggest existing knowledge
+	docIndicators := []string{
+		"README.md", "docs", "adr", "ARCHITECTURE.md",
+	}
+	for _, f := range docIndicators {
+		if _, err := os.Stat(filepath.Join(projectRoot, f)); err == nil {
+			return true
+		}
+	}
+
+	return false
+}
+
 func createDirectoryStructure(quintDir string) error {
+	// v5 artifact directories — created minimal, expanded on demand
 	dirs := []string{
-		"evidence",
+		"notes",
+		"problems",
+		"solutions",
 		"decisions",
-		"sessions",
-		"knowledge/L0",
-		"knowledge/L1",
-		"knowledge/L2",
-		"knowledge/invalid",
-		"agents",
+		"evidence",
+		"refresh",
 	}
 
 	for _, d := range dirs {
@@ -179,13 +342,15 @@ func createDirectoryStructure(quintDir string) error {
 	return nil
 }
 
-func initializeDatabase(quintDir string) error {
-	dbPath := filepath.Join(quintDir, "quint.db")
-	database, err := db.New(dbPath)
+func initializeDatabase(dbPath string) error {
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+		return err
+	}
+	database, err := db.NewStore(dbPath)
 	if err != nil {
 		return err
 	}
-	database.Close()
+	_ = database.Close()
 	return nil
 }
 
@@ -209,7 +374,7 @@ type MCPServer struct {
 	Timeout int               `json:"timeout,omitempty"`
 }
 
-func mergeMCPConfig(configPath, binaryPath, projectRoot string, extraFields map[string]interface{}) error {
+func mergeMCPConfig(configPath, binaryPath, _ string, extraFields map[string]interface{}) error {
 	var config MCPConfig
 
 	if data, err := os.ReadFile(configPath); err == nil {
@@ -225,14 +390,16 @@ func mergeMCPConfig(configPath, binaryPath, projectRoot string, extraFields map[
 	server := MCPServer{
 		Command: binaryPath,
 		Args:    []string{"serve"},
-		Cwd:     projectRoot,
-		Env: map[string]string{
-			"QUINT_PROJECT_ROOT": projectRoot,
-		},
 	}
 
 	if timeout, ok := extraFields["timeout"].(int); ok {
 		server.Timeout = timeout
+	}
+	if env, ok := extraFields["env"].(map[string]string); ok {
+		server.Env = env
+	}
+	if cwd, ok := extraFields["cwd"].(string); ok {
+		server.Cwd = cwd
 	}
 
 	config.MCPServers["quint-code"] = server
@@ -251,12 +418,20 @@ func mergeMCPConfig(configPath, binaryPath, projectRoot string, extraFields map[
 
 func configureMCPClaude(projectRoot, binaryPath string) error {
 	configPath := filepath.Join(projectRoot, ".mcp.json")
-	return mergeMCPConfig(configPath, binaryPath, projectRoot, nil)
+	return mergeMCPConfig(configPath, binaryPath, projectRoot, map[string]interface{}{
+		"env": map[string]string{
+			"QUINT_PROJECT_ROOT": projectRoot,
+		},
+	})
 }
 
 func configureMCPCursor(projectRoot, binaryPath string) error {
 	configPath := filepath.Join(projectRoot, ".cursor", "mcp.json")
-	return mergeMCPConfig(configPath, binaryPath, projectRoot, nil)
+	return mergeMCPConfig(configPath, binaryPath, projectRoot, map[string]interface{}{
+		"env": map[string]string{
+			"QUINT_PROJECT_ROOT": projectRoot,
+		},
+	})
 }
 
 func configureMCPGemini(projectRoot, binaryPath string) error {
@@ -267,15 +442,15 @@ func configureMCPGemini(projectRoot, binaryPath string) error {
 	configPath := filepath.Join(homeDir, ".gemini", "settings.json")
 	return mergeMCPConfig(configPath, binaryPath, projectRoot, map[string]interface{}{
 		"timeout": 30000,
+		"cwd":     projectRoot,
+		"env": map[string]string{
+			"QUINT_PROJECT_ROOT": projectRoot,
+		},
 	})
 }
 
 func configureMCPCodex(projectRoot, binaryPath string) error {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return err
-	}
-	configPath := filepath.Join(homeDir, ".codex", "config.toml")
+	configPath := filepath.Join(projectRoot, ".codex", "config.toml")
 
 	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
 		return err
@@ -290,7 +465,11 @@ func configureMCPCodex(projectRoot, binaryPath string) error {
 [mcp_servers.quint-code]
 command = "%s"
 args = ["serve"]
-env = { QUINT_PROJECT_ROOT = "%s" }
+startup_timeout_sec = 10
+tool_timeout_sec = 60
+
+[mcp_servers.quint-code.env]
+QUINT_PROJECT_ROOT = "%s"
 `, binaryPath, projectRoot)
 
 	if start := strings.Index(existing, "[mcp_servers.quint-code]"); start != -1 {
@@ -305,4 +484,3 @@ env = { QUINT_PROJECT_ROOT = "%s" }
 
 	return os.WriteFile(configPath, []byte(updated), 0644)
 }
-

@@ -1,106 +1,136 @@
 <img src="assets/banner.svg" alt="Quint Code" width="600">
 
-**Structured reasoning for AI coding tools** — make better decisions, remember why you made them.
+**Engineering decisions that know when they're stale.**
 
-**Supports:** Claude Code, Cursor, Gemini CLI, Codex CLI
+Frame problems. Compare options fairly. Record decisions as contracts. Know when to revisit.
 
-> **Works exceptionally well with Claude Code!**
+Supports: Claude Code, Cursor, Gemini CLI, Codex CLI, Codex App, Air
 
-## The Problem
+---
 
-Your AI coding assistant gives you an answer. It looks right. But in three months, will you remember *why* it was the right choice? What alternatives were considered? What evidence was there? Was the decision based on a solid foundation or a statistical fluke?
-
-Unauditable AI suggestions create a debt of hidden risk.
-
-Quint Code provides the structure to turn AI-assisted development into a rigorous, auditable reasoning process. It's decision hygiene for the age of AI.
-
-## Quick Start
-
-### Step 1: Install the Binary
+## Install
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/m0n0x41d/quint-code/main/install.sh | bash
 ```
 
-Or build from source:
+Then in your project, run init **with your tool's flag**:
 
 ```bash
-git clone https://github.com/m0n0x41d/quint-code.git
-cd quint-code/src/mcp
-go build -o quint-code .
-sudo mv quint-code /usr/local/bin/
-```
-
-### Step 2: Initialize a Project
-
-```bash
-cd /path/to/your/project
+# Claude Code (default if no flag)
 quint-code init
+
+# Cursor
+quint-code init --cursor
+
+# Gemini CLI
+quint-code init --gemini
+
+# Codex CLI / Codex App
+quint-code init --codex
+
+# JetBrains Air
+quint-code init --air
+
+# All tools at once
+quint-code init --all
 ```
 
-This creates:
+### What init does per tool
 
-- `.quint/` — knowledge base, evidence, decisions
-- `.mcp.json` — MCP server configuration
-- `~/.claude/commands/` — slash commands (global by default)
+The binary is the same — only the MCP config location differs:
 
-**Flags:**
+| Tool | MCP Config | Commands | Skill |
+|------|-----------|----------|-------|
+| Claude Code | `.mcp.json` (project root) | `~/.claude/commands/` | `~/.claude/skills/q-reason/` |
+| Cursor | `.cursor/mcp.json` | `~/.cursor/commands/` | `~/.cursor/skills/q-reason/` |
+| Gemini CLI | `~/.gemini/settings.json` | `~/.gemini/commands/` | — |
+| Codex CLI | `.codex/config.toml` | `~/.codex/prompts/` | `~/.agents/skills/q-reason/` |
+| Air | `.codex/config.toml` | project `skills/` | project `skills/q-reason/` |
 
-| Flag | MCP Config | Commands |
-|------|-----------|----------|
-| `--claude` (default) | `.mcp.json` | `~/.claude/commands/*.md` |
-| `--cursor` | `.cursor/mcp.json` | `~/.cursor/commands/*.md` |
-| `--gemini` | `~/.gemini/settings.json` | `~/.gemini/commands/*.toml` |
-| `--codex` | `~/.codex/config.toml`* | `~/.codex/prompts/*.md` |
-| `--all` | All of the above | All of the above |
-| `--local` | — | Commands in project dir instead of global |
+**Important for Cursor:** After init, open Cursor Settings → MCP → find `quint-code` → enable the toggle. Cursor adds MCP servers as disabled by default.
 
-> **\* Codex CLI limitation:** Codex [doesn't support per-project MCP configuration](https://github.com/openai/codex/issues/2628). Run `quint-code init --codex` in **each project before starting work to switch the active project in global codex mcp config**.
+**Note:** Cursor also picks up Claude Code commands from `~/.claude/commands/` — so slash commands work even without `--cursor`. But MCP config (`.cursor/mcp.json`) must be set up for the tools to connect.
 
-### Step 3: Start Reasoning
+Existing project? Run `/q-onboard` after init — the agent scans your codebase for existing decisions worth capturing.
 
-```bash
-/q0-init                           # Initialize knowledge base
-/q1-hypothesize "Your problem..."  # Generate hypotheses
+**First time?** Ask the agent to explain how it works:
+
 ```
+/q-reason explain how to work with quint-code effectively — what commands exist, when to use each one, and what's the recommended workflow
+```
+
+The agent has full knowledge of all Quint tools and will walk you through them in context of your project.
+
+---
 
 ## How It Works
 
-Quint Code implements the **[First Principles Framework (FPF)](https://github.com/ailev/FPF)** by Anatoly Levenchuk — a methodology for rigorous, auditable reasoning. The killer feature is turning the black box of AI reasoning into a transparent, evidence-backed audit trail.
+### One command: `/q-reason`
 
-The core cycle follows three modes of inference:
+Describe your problem. The agent frames it, generates alternatives, compares them fairly, and records the decision — all in one command. It auto-selects the right depth.
 
-1. **Abduction** — Generate competing hypotheses (don't anchor on the first idea).
-2. **Deduction** — Verify logic and constraints (does the idea make sense?).
-3. **Induction** — Gather evidence through tests or research (does the idea work in reality?).
+### Or drive each step manually
 
-Then, audit for bias, decide, and document the rationale in a durable record.
+```
+/q-frame  → /q-char  → /q-explore → /q-compare → /q-decide
+  what's      what       genuinely     fair         engineering
+  broken?     matters?   different     comparison   contract
+                         options
+```
 
-See [docs/fpf-engine.md](docs/fpf-engine.md) for the full breakdown.
+### Micro-decisions on the fly
 
-## Commands
+The agent captures decisions automatically when it notices them in conversation. No rationale — no record. Conflicts with active decisions are flagged. Auto-expires in 90 days.
 
-| Command | What It Does |
-|---------|--------------|
-| `/q0-init` | Initialize `.quint/` and record the Bounded Context. |
-| `/q1-hypothesize` | Generate L0 hypotheses for a problem. |
-| `/q1-add` | Manually add your own L0 hypothesis. |
-| `/q2-verify` | Verify logic and constraints, promoting claims from L0 to L1. |
-| `/q3-validate` | Gather empirical evidence, promoting claims from L1 to L2. |
-| `/q4-audit` | Run an assurance audit and calculate trust scores. |
-| `/q5-decide` | Select the winning hypothesis and create a Design Rationale Record. |
-| `/q-status` | Show the current state of the reasoning cycle. |
-| `/q-query` | Search the project's knowledge base. |
-| `/q-decay` | Check for and report expired evidence (Epistemic Debt). |
-| `/q-actualize` | Reconcile the knowledge base with recent code changes. |
-| `/q-reset` | Discard the current reasoning cycle. |
+### When decisions go stale
 
-## Documentation
+`/q-status` shows what's expired and what needs attention. `/q-refresh` manages the lifecycle of ALL artifact types — waive, reopen, supersede, or deprecate.
 
-- [FPF Engine Details](docs/fpf-engine.md) — ADI cycle, commands, when to use
-- [Architecture](docs/architecture.md) — Internals, knowledge levels, Transformer Mandate
-- [Contributing](CONTRIBUTING.md) — How to contribute
+---
+
+## What Makes It Different
+
+- **Decisions are live** — they have computed trust scores (R_eff) that degrade as evidence ages. An expired benchmark drops the whole score.
+- **Comparison is honest** — parity enforced, dimensions cross-checked, asymmetric scoring warned. Anti-Goodhart: tag dimensions as "observation" to prevent optimizing the wrong metric.
+- **Memory across sessions** — when you frame a problem, the tool surfaces related past decisions. When you explore, it checks for similar variants.
+- **The loop closes** — failed measurements suggest reopening. Evidence decay triggers review. Periodic refresh prompts ensure nothing goes stale silently.
+- **Decisions are contracts** — FPF E.9 format: Problem Frame, Decision (invariants + DO/DON'T), Rationale, Consequences. A new engineer reads it 6 months later and gets everything.
+
+---
+
+## 6 Tools
+
+| Tool | What it does |
+|------|-------------|
+| `quint_note` | Micro-decisions with validation + auto-expiry |
+| `quint_problem` | Frame problems, define comparison dimensions with roles |
+| `quint_solution` | Explore variants with diversity check, compare with parity |
+| `quint_decision` | FPF E.9 decision contract, impact measurement, evidence |
+| `quint_refresh` | Lifecycle management for all artifacts |
+| `quint_query` | Search, status dashboard, file-to-decision lookup |
+
+---
+
+## Built on First Principles Framework
+
+[FPF](https://github.com/ailev/FPF) by [Anatoly Levenchuk](https://www.linkedin.com/in/ailev/) — a rigorous, transdisciplinary architecture for thinking.
+
+`/q-reason` gives your AI agent an FPF-native operating system for engineering decisions: problem framing before solutions, characterization before comparison, parity enforcement, evidence with congruence penalties, weakest-link assurance, and the lemniscate cycle that closes itself when evidence ages or measurements fail.
+
+`quint-code fpf search` gives you access to 4243 indexed sections from the FPF specification — the agent can look up any concept on demand.
+
+---
+
+## Learn More
+
+See the [documentation](https://quint.codes/learn) for detailed guides on decision modes, the DRR format, computed features, and lifecycle management.
+
+## Requirements
+
+- Go 1.24+ (for building from source)
+- Any MCP-capable AI tool
 
 ## License
 
-MIT License. FPF methodology by [Anatoly Levenchuk](https://github.com/ailev/FPF).
+MIT
