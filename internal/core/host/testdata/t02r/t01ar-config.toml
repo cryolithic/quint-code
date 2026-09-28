@@ -1,0 +1,10 @@
+model = "operator"
+[mcp_servers.foreign]
+command = "foreign-tool"
+args = ["one", "two"]
+
+# haft10:start
+[mcp_servers.haft10]
+command = "/Users/fixture/haft-test/T02-probes-004/T01AR/bin/haft10"
+args = ["serve","--root","/Users/fixture/haft-test/T02-probes-004/T01AR/project","--source-root","/Users/fixture/haft-test/T02-probes-004/T01AR/source","--source-repository","fixture-source"]
+# haft10:end

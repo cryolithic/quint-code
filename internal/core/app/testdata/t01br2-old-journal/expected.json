@@ -1,0 +1,6 @@
+{
+  "producer_head": "b6874589aa9247f588a3bfd29a6ba22ccee40d63",
+  "producer_binary_sha256": "5341548f53edd67b6512f17cb59d87dfa5f9129ed3842f945439729837684c16",
+  "predecessor_ref": "spec-20260925-9758dabd@sha256:4b7993e0e60ca2ff11a2faf787fa89787f0d655a58b930433d8559b831ae5f7e",
+  "published_successor_ref": "spec-20260925-aee267ed@sha256:6846c795c2024d4f259538e52c187e9d13bd132acf78d9df8629a6f7af652365"
+}

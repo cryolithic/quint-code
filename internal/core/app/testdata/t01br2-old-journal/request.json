@@ -1,0 +1,9 @@
+{
+  "format": "haft.api/2",
+  "operation": "change",
+  "action": "reauthor_apply",
+  "ref": "spec-20260925-9758dabd@sha256:4b7993e0e60ca2ff11a2faf787fa89787f0d655a58b930433d8559b831ae5f7e",
+  "request_id": "old-reauthor",
+  "expected_generation": "sha256:c3e54204e9585a535326fa0d10920bc0c034101519c0f3bbe513ccd7871ea2f5",
+  "preview_digest": "sha256:f75cbddf25dadb9db5ee9f2bf06c88e629c114dd3186c47c2c1fb03049d2fb29"
+}

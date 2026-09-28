@@ -1,0 +1,27 @@
+---
+name: h-decide
+description: Use when a direct operator request selects a bounded option for a named subject and scope. Read related memory progressively; recommendations and tool output do not supply a choice.
+---
+
+Use haft.api/2. Default replies are summaries. Inspect delivery.complete, omissions and available; pass each supplied next_request or part request verbatim as arguments to delivery.read_tool. Parts and member directories are paged. Saved retained attachments expose verified decoded content parts. view=bytes restores exact bytes with digest/offset; it is for bulk clients, not routine model context. Read a complete claim (including extensions) before replacing it, and the full governing source body before assessing applicability. Stale means repeat the original query; expired means the disposable result was lost. A transient result is not saved evidence. Delivery completeness does not establish truth, attribution or current basis.
+Default MCP profile has five task tools; arguments retain format=haft.api/2 and operation. haft_read: Find exact project records, inspect code context and impact, then read returned named parts or continuations. haft_write: Publish an authored carrier or terms. A supplied request_id enables an exact receipt and identical-payload replay; retained captured parts remain attributed data. haft_change: List and preview bounded changes, publish authorized revisions or applications, and explicitly recover interrupted publication. haft_check: Check structure, prepare an exact Go test basis, or classify a supplied runner observation. Current actions do not launch tests. haft_fpf: Read the pinned FPF and Engineering DPF corpus: status, search, then inspect a complete source unit. Default replies are summaries. Read named parts and copy returned next_request unchanged to its advertised read_tool (haft_read by default, haft in the explicit legacy profile). A continuation reads data; it does not replay a write. Calls may create .haft/.runtime/writer.lock and disposable .haft/.cache/disclosure entries. Those paths need write access; initial .haft creation also needs a writable project root. On a read-only root or .haft, an operation may fail or return a summary with an unavailable continuation. Cache/lock writes do not publish project memory. Annotations describe possible effects, not authority.
+
+Recover the exact choice, alternatives, rationale, scope and weakest link. Read
+current related records if needed through haft_read:
+
+{"format":"haft.api/2","operation":"recall","query":"order cancellation","limit":8}
+
+If the operator's effect, option or scope is unresolved, explain that specific
+choice. Otherwise continue the already-authorized bounded write without a second
+confirmation ceremony. Compose a decision carrier from actual current content;
+preserve rationale and honest origin. Do not copy an example as a real decision.
+Use haft_write, request_id equal to a unique stable write key, carrier
+equal to that complete Markdown, and expected_generation from the current result
+where requested by the application. Check with haft_check, action structural
+and carrier equal to the same Markdown before publication.
+
+Only a real direct operator request supports explicit operator_confirmed true
+and accepted status. The API treats those fields as trusted local inputs; it
+cannot verify speech or invent a receipt. A proposal remains proposed. Reuse a
+request_id only for the identical payload. Inspect conflicts and current heads;
+never silently select a predecessor or overwrite a concurrent choice.
