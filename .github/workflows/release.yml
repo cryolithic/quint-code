@@ -2,7 +2,9 @@ name: Release
 
 on:
   push:
-    tags: ['v*']
+    # This workflow builds the stable cmd/haft binary. The separate haft10
+    # alpha uses its reviewed, prebuilt archive and a manual prerelease path.
+    tags: ['v*', '!v*alpha*']
   workflow_dispatch:
     inputs:
       operation:
