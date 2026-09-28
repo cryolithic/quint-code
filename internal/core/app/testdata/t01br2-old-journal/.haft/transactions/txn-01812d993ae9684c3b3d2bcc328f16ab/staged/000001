@@ -1,0 +1,22 @@
+---
+format: haft/1
+id: spec-20260925-9758dabd
+kind: spec
+title: Original proposal
+status: proposed
+origin: agent_proposal
+about: domain:Controller.Replay
+created_at: "2026-09-25T04:33:43Z"
+write_receipt:
+    request_id: old-seed
+    payload_digest: sha256:db33af2a54112ccfe5c9bae3897973a29267bc5b0b80044785736562185e8003
+slug: replay-test
+claims:
+    - id: rule
+      kind: definition
+      text: Original rule
+receiving_use: Verify actual old journal compatibility
+x-preserved:
+    version: 1
+---
+Original rationale.

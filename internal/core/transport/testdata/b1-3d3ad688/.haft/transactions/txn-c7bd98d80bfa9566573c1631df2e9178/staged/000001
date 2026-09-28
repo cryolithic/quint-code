@@ -1,0 +1,18 @@
+---
+format: haft/1
+id: note-20260925-0b10a001
+kind: note
+title: Frozen B1 protocol fixture
+status: proposed
+origin: agent_proposal
+about: domain:Fixture.Protocol
+created_at: "2026-09-25T00:00:00Z"
+write_receipt:
+    request_id: t01a-frozen-b1-note
+    payload_digest: sha256:cc34cef2fe19d074af46e9c1c4e52e07bc1a30e5fa3b11304b8e6e6419b24b60
+x-fixture-extension:
+    untouched: true
+    version: one
+---
+This note was written by the exact B1 haft10 binary.
+Its extension and receipt must remain readable.

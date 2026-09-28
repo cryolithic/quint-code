@@ -1,0 +1,19 @@
+{
+  "producer_commit": "3d3ad688944ed7587ad38f406d7efa8999fa758f",
+  "producer_binary_sha256": "a8430ba6ec9a4d1124a003ca080f127e86bd209cdb600314685bceccd2a359fe",
+  "producer_command": "haft10 api --root <test-owned-temp-root> --input -",
+  "request_file": "request.json",
+  "record_id": "note-20260925-0b10a001",
+  "request_id": "t01a-frozen-b1-note",
+  "payload_digest": "sha256:cc34cef2fe19d074af46e9c1c4e52e07bc1a30e5fa3b11304b8e6e6419b24b60",
+  "generation": "sha256:38f0965e7a194fa2affd209b7ca2cb511b0349c3e286dcbd0e32efab842a783f",
+  "transaction_id": "txn-c7bd98d80bfa9566573c1631df2e9178",
+  "files": {
+    ".haft/editions/sha256/7710396769db2f813b18424960137ea830413b64827152ed33edffc8e78cd347.json": "sha256:7710396769db2f813b18424960137ea830413b64827152ed33edffc8e78cd347",
+    ".haft/notes/note-20260925-0b10a001.md": "sha256:9afe05d82eb89cb47c9683282f523be0013acb107bd44cd573c053c13185a45a",
+    ".haft/transactions/txn-c7bd98d80bfa9566573c1631df2e9178/commit.json": "sha256:5a6830ace1da0e521cca568b53c79ac22de8d8f4dfaa99be6870aadc11d6b34a",
+    ".haft/transactions/txn-c7bd98d80bfa9566573c1631df2e9178/manifest.json": "sha256:80274adf76f7a80ee2d70a85925901acb387837be43efde1fd81bdf29de5f3bd",
+    ".haft/transactions/txn-c7bd98d80bfa9566573c1631df2e9178/staged/000000": "sha256:7710396769db2f813b18424960137ea830413b64827152ed33edffc8e78cd347",
+    ".haft/transactions/txn-c7bd98d80bfa9566573c1631df2e9178/staged/000001": "sha256:9afe05d82eb89cb47c9683282f523be0013acb107bd44cd573c053c13185a45a"
+  }
+}

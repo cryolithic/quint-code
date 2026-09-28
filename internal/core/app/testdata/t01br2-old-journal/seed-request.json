@@ -1,0 +1,6 @@
+{
+  "format": "haft.api/2",
+  "operation": "remember",
+  "request_id": "old-seed",
+  "carrier": "---\nformat: haft/1\nkind: spec\ntitle: Original proposal\nslug: replay-test\nabout: domain:Controller.Replay\nstatus: proposed\norigin: agent_proposal\nreceiving_use: Verify actual old journal compatibility\nclaims:\n  - id: rule\n    kind: definition\n    text: Original rule\nx-preserved:\n  version: 1\n---\nOriginal rationale.\n"
+}

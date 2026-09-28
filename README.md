@@ -23,6 +23,10 @@ it in engineering work.
 curl -fsSL https://raw.githubusercontent.com/m0n0x41d/haft/main/install.sh | bash
 ```
 
+This installs the current `haft` release. The separate experimental `haft10`
+alpha for macOS arm64 has its own archive and setup path; see
+[Haft10 alpha](ALPHA.md). The alpha does not replace this installer.
+
 For a project that has not used Haft before, initialize it once. Bare
 `haft init` opens an interactive multi-select when stdin and stdout are
 terminals; no host is preselected. Scripts and CI must name their intent
