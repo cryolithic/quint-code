@@ -5,11 +5,11 @@ copies on macOS arm64 with Codex**. It does not replace the ordinary `haft`
 installation or migrate a live v9 project. Linux and other hosts are not yet
 qualified.
 
-The planned prerelease is
-[`v10.0.0-alpha.f5893beb2164`](https://github.com/m0n0x41d/haft/releases/tag/v10.0.0-alpha.f5893beb2164),
-titled **Haft10 10.0.0-alpha.f5893beb2164**. Once that release is published,
-download `haft10_10.0.0-alpha.f5893beb2164_darwin_arm64.tar.gz` and
-`SHA256SUMS` from its assets. Verify the archive before unpacking:
+Download the
+[`v10.0.0-alpha.f5893beb2164`](https://github.com/m0n0x41d/haft/releases/tag/v10.0.0-alpha.f5893beb2164)
+prerelease, titled **Haft v10 alpha — 10.0.0-alpha.f5893beb2164**. Select
+`haft10_10.0.0-alpha.f5893beb2164_darwin_arm64.tar.gz` and `SHA256SUMS`
+from its assets. Verify the archive before unpacking:
 
 ```sh
 shasum -a 256 -c SHA256SUMS
@@ -45,11 +45,11 @@ This is not broad host qualification or a comparative usefulness claim.
 
 Known limits:
 
-- N1: Upgrade of caches from experimental pre-alpha packages is unqualified.
-- N3: For an oversized summary, a detail child may report `missing_part`.
+- Upgrade of caches from experimental pre-alpha packages is unqualified.
+- For an oversized summary, a detail child may report `missing_part`.
   Request `part=summary, view=bytes` and follow the returned continuations,
   or read named claim/record parts.
-- F6: The exact upstream ICU revision for vendored Unicode headers remains
+- The exact upstream ICU revision for vendored Unicode headers remains
   unestablished; included notices identify known provenance but do not make
   a legal compliance claim.
 - Current spec content is not binding approval. Selected checks were run;
